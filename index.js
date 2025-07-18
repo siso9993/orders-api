@@ -2,19 +2,25 @@ import express from 'express';
 import csv from 'csv-parser';
 import { pipeline } from 'stream';
 import { promisify } from 'util';
-import fetch from 'node-fetch';          // Railway defaultuje ešte Node 18 → fetch treba takto
+import { createReadStream } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
-const PORT = process.env.PORT || 3000;
-const CSV_URL = process.env.CSV_URL;     // ⚠️ nastavíš v Railway
-const CACHE_TTL = 30 * 1000;             // 30 s – zmeň na 0, ak chceš úplne real‑time
+const PORT      = process.env.PORT || 3000;
+/*  ak by si chcel súbor prehodiť inde / premennú z Railway,
+    nastav CSV_FILE, inak sa berie `api/pohoda_orders.csv` v repo  */
+const CSV_FILE  = process.env.CSV_FILE ||
+                  join(dirname(fileURLToPath(import.meta.url)), 'api', 'pohoda_orders.csv');
 
-const pipe = promisify(pipeline);
-const app = express();
+const CACHE_TTL = 30 * 1000;            // 30 s
 
-let cache = [];
+const pipe  = promisify(pipeline);
+const app   = express();
+
+let cache     = [];
 let lastFetch = 0;
 
-// --- pomocné mapovanie z CSV -> čitateľné mená -----------------------------
+// ------------------------- normalizácia stĺpcov ----------------------------
 function normalize(r) {
   return {
     id_objednavky:                   r['OBJ.ID'],
@@ -65,36 +71,34 @@ function normalize(r) {
 }
 // ---------------------------------------------------------------------------
 
-async function reload() {
-  const res = await fetch(CSV_URL);
-  if (!res.ok) throw new Error('Fetch failed: ' + res.status);
-
+async function reload () {
   const rows = [];
   await pipe(
-    res.body,
+    createReadStream(CSV_FILE),
     csv({ separator: ';' }).on('data', row => rows.push(normalize(row)))
   );
 
-  cache = rows;
+  cache     = rows;
   lastFetch = Date.now();
   console.log(`CSV reloaded: ${rows.length} riadkov`);
 }
 
-async function getData() {
+async function getData () {
   if (Date.now() - lastFetch > CACHE_TTL) await reload();
   return cache;
 }
 
+// ------------------------------- API ---------------------------------------
 app.get('/orders', async (req, res) => {
   const q = (req.query.query || '').trim();
   if (!q) return res.status(400).json({ error: 'pridaj ?query=' });
 
   try {
     const data = await getData();
-    // Najskôr presné číslo objednávky, ak nič -> skús ID faktúry
-    const result =
-      data.filter(r => r.cislo_objednavky === q) ||
-      data.filter(r => r.cislo_faktury === q);
+
+    const byOrder  = data.filter(r => r.cislo_objednavky === q);
+    const byInvoice= data.filter(r => r.cislo_faktury   === q);
+    const result   = byOrder.length ? byOrder : byInvoice;
 
     if (!result.length) return res.status(404).json({ error: 'nič sme nenašli' });
     res.json(result);
@@ -103,5 +107,8 @@ app.get('/orders', async (req, res) => {
     res.status(500).json({ error: 'CSV sa nepodarilo načítať' });
   }
 });
+
+// jednoduchý health‑check
+app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
 app.listen(PORT, () => console.log(`API beží na porte ${PORT}`));
