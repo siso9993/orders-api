@@ -1,31 +1,29 @@
 import express from 'express';
-import csv from 'csv-parser';
-import { pipeline } from 'stream';
-import { promisify } from 'util';
+import fetch from 'node-fetch';           // Node < 18 pridaj do dependencies
+import { parse } from 'csv-parse/sync';
 
 const PORT    = process.env.PORT || 3000;
-const CSV_URL = process.env.CSV_URL;     // nastavíš v Railway
+const CSV_URL = process.env.CSV_URL;      // nastavíš v Railway
 
-const pipe = promisify(pipeline);
-const app  = express();
+const app = express();
 
-/* 🔹 pomocná funkcia – vždy string, bez medzier, CR, BOM … */
+/* 🔹 common helper */
 const clean = v => (v ?? '').toString().replace(/^\uFEFF/, '').trim();
 
-/* ---------- robustné skrátenie hlavičky ------------------ */
-function shorten(row) {
+/* 🔹 skrátenie hlavičky na OBJ.* */
+function shortenKeys(row) {
   const o = {};
   for (const [k, v] of Object.entries(row)) {
-    let short = k.includes('-') ? k.split('-').pop() : k;           // 1️⃣ po „-“
-    const m   = short.match(/(OBJ\.[\w.]+)$/);                     // 2️⃣ posledný OBJ.
-    if (m) short = m[1];
-    o[clean(short)] = v;
+    if (!k) continue;
+    let key = k.includes('-') ? k.split('-').pop() : k;
+    const m  = key.match(/(OBJ\.[\w.]+)$/);
+    if (m) key = m[1];
+    o[clean(key)] = v;
   }
   return o;
 }
-/* ---------------------------------------------------------- */
 
-/* ----------- mapovanie na pekné kľúče + clean() ----------- */
+/* 🔹 mapujeme na pekné názvy */
 function normalize(r) {
   return {
     id_objednavky:                   clean(r['OBJ.ID']),
@@ -71,43 +69,45 @@ function normalize(r) {
     cislo_faktury:                   clean(r['OBJ.VPrCislofakturyt']),
     objednane_u_dodavatela:          clean(r['OBJ.VPrObjednaneUdod']),
     planovane_naskladnenie:          clean(r['OBJ.VPrDatDodKuNam']),
-    dovod_meskania:                  clean(r['OBJ.VPrDovodMeskanTo']),
+    dovod_meskania:                  clean(r['OBJ.VPrDovodMeskanTo'])
   };
 }
-/* ---------------------------------------------------------- */
 
-/* ------------ vždy stiahne ČERSTVÉ CSV -------------------- */
-async function fetchCsv() {
-  const url = `${CSV_URL}${CSV_URL.includes('?') ? '&' : '?'}t=${Date.now()}`; // cache‑buster
-  const res = await fetch(url, { headers: { 'Cache-Control': 'no-cache' } });
-  if (!res.ok) throw new Error('Fetch failed: ' + res.status);
+/* 🔹 vždy čerstvé CSV (cache‑buster) */
+async function loadCsv() {
+  const url  = `${CSV_URL}${CSV_URL.includes('?') ? '&' : '?'}t=${Date.now()}`;
+  const resp = await fetch(url, { headers: { 'Cache-Control': 'no-cache' }});
+  if (!resp.ok) throw new Error(`CSV fetch failed: ${resp.status}`);
 
-  const rows = [];
-  await pipe(
-    res.body,
-    csv({ separator: ';' })
-      .on('data', row => rows.push(normalize(shorten(row))))
-  );
+  const text = await resp.text();
+  const raw  = parse(text, {
+    delimiter: ';',
+    columns: true,
+    skip_empty_lines: true,
+    relax_column_count: true,
+    bom: true
+  });
 
+  const rows = raw.map(r => normalize(shortenKeys(r)));
   console.log(`CSV načítané: ${rows.length} riadkov`);
   return rows;
 }
-/* ---------------------------------------------------------- */
 
+/* 🔹 /orders endpoint */
 app.get('/orders', async (req, res) => {
   const q = clean(req.query.query);
   if (!q) return res.status(400).json({ error: 'pridaj ?query=' });
 
   try {
-    const data = await fetchCsv();          // ⬅ žiadna cache, vždy nové dáta
+    const data = await loadCsv();
 
     let result = data.filter(r => r.cislo_objednavky === q);
     if (!result.length) result = data.filter(r => r.cislo_faktury === q);
 
     if (!result.length) return res.status(404).json({ error: 'nič sme nenašli' });
     res.json(result);
-  } catch (e) {
-    console.error(e);
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ error: 'CSV sa nepodarilo načítať' });
   }
 });
