@@ -10,38 +10,46 @@ const app = express();
 /* util – always string, trim, bez BOM */
 const clean = v => (v ?? '').toString().replace(/^\uFEFF/, '').trim();
 
-/* ---------- pomôcka: parse položky ------------------------- */
+/* ---- parseItems ------------------------------------------------ */
 function parseItems(str = '') {
   return str
     .split('|')
     .map(s => s.trim())
     .filter(Boolean)
     .map(raw => {
-      /* oddelíme časť v zátvorke */
-      const idx = raw.lastIndexOf('(');
+      const idx  = raw.lastIndexOf('(');
       const left = idx !== -1 ? raw.slice(0, idx) : raw;
       const meta = idx !== -1 ? raw.slice(idx + 1, -1) : '';
 
-      /* kód = čísla pred prvou pomlčkou; môže chýbať */
+      /* kód a názov */
       let kod = null, nazov = left.replace(/^-+/, '').trim();
-      const m = nazov.match(/^(\d+)\s*[-\s]+(.+)$/);
-      if (m) {
-        kod   = m[1];
-        nazov = m[2].trim();
+      const mCode = nazov.match(/^(\d+)\s*[-\s]+(.+)$/);
+      if (mCode) {
+        kod   = mCode[1];
+        nazov = mCode[2].trim();
       }
 
-      /* množstvo a cena v zátvorke */
-      const qty  = parseFloat((meta.match(/Objednané množstvo\s*:\s*([\d.,]+)/i) || [,''])[1].replace(',', '.')) || null;
-      const cena = parseFloat((meta.match(/Suma položky\s*:\s*([\d.,]+)/i)       || [,''])[1].replace(',', '.')) || null;
+      /* množstvo */
+      const qty = parseFloat(
+        (meta.match(/Objednané množstvo\s*:\s*([\d.,]+)/i) || [, ''])[1]
+          .replace(',', '.')
+      ) || null;
+
+      /* cena + mena (EUR, CZK …) */
+      const mPrice = meta.match(/Suma položky\s*:\s*([\d.,]+)\s*([A-Z]{3})?/i);
+      const cena   = mPrice ? parseFloat(mPrice[1].replace(',', '.')) : null;
+      const mena   = mPrice && mPrice[2] ? mPrice[2] : null;   // ak neudá, zostane null
 
       return {
         kod_polozky:      kod,
         nazov_polozky:    nazov,
         mnozstvo_polozky: qty,
-        cena_polozky:     cena
+        cena_polozky:     cena,
+        mena_polozky:     mena
       };
     });
 }
+
 /* ----------------------------------------------------------- */
 
 /* skracovanie hlavičky na posledný „OBJ.…“ */
