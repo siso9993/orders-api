@@ -9,6 +9,6 @@
   "dependencies": {
     "express": "^4.18.3",
     "csv-parser": "^3.0.0",
-    "node-fetch": "^3.3.1"
+    "node-fetch": "REMOVE"
   }
 }
