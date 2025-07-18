@@ -2,7 +2,7 @@ import express from 'express';
 import csv from 'csv-parser';
 import { pipeline } from 'stream';
 import { promisify } from 'util';
-import fetch from 'node-fetch';                // Railway na Node 18 → fetch takto
+
 
 const PORT     = process.env.PORT || 3000;
 const CSV_URL  = process.env.CSV_URL;          // nastavíš v Railway
