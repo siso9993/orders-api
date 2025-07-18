@@ -1,20 +1,53 @@
 import express from 'express';
-import fetch from 'node-fetch';            // potreba pri Node < 18
+import fetch from 'node-fetch';
 import { parse } from 'csv-parse/sync';
 
 const PORT    = process.env.PORT || 3000;
-const CSV_URL = process.env.CSV_URL;       // nastavíš v Railway
+const CSV_URL = process.env.CSV_URL;
 
 const app = express();
 
-/* helper – string + trim + odrezanie BOM */
+/* util – always string, trim, bez BOM */
 const clean = v => (v ?? '').toString().replace(/^\uFEFF/, '').trim();
 
-/* skracovanie hlavičiek na posledný „OBJ.…“ */
-function shortenKeys(row) {
+/* ---------- pomôcka: parse položky ------------------------- */
+function parseItems(str = '') {
+  return str
+    .split('|')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(raw => {
+      /* oddelíme časť v zátvorke */
+      const idx = raw.lastIndexOf('(');
+      const left = idx !== -1 ? raw.slice(0, idx) : raw;
+      const meta = idx !== -1 ? raw.slice(idx + 1, -1) : '';
+
+      /* kód = čísla pred prvou pomlčkou; môže chýbať */
+      let kod = null, nazov = left.replace(/^-+/, '').trim();
+      const m = nazov.match(/^(\d+)\s*[-\s]+(.+)$/);
+      if (m) {
+        kod   = m[1];
+        nazov = m[2].trim();
+      }
+
+      /* množstvo a cena v zátvorke */
+      const qty  = parseFloat((meta.match(/Objednané množstvo\s*:\s*([\d.,]+)/i) || [,''])[1].replace(',', '.')) || null;
+      const cena = parseFloat((meta.match(/Suma položky\s*:\s*([\d.,]+)/i)       || [,''])[1].replace(',', '.')) || null;
+
+      return {
+        kod_polozky:      kod,
+        nazov_polozky:    nazov,
+        mnozstvo_polozky: qty,
+        cena_polozky:     cena
+      };
+    });
+}
+/* ----------------------------------------------------------- */
+
+/* skracovanie hlavičky na posledný „OBJ.…“ */
+function shortenKeys(r) {
   const o = {};
-  for (const [k, v] of Object.entries(row)) {
-    if (!k) continue;
+  for (const [k, v] of Object.entries(r)) {
     let key = k.includes('-') ? k.split('-').pop() : k;
     const m = key.match(/(OBJ\.[\w.]+)$/);
     if (m) key = m[1];
@@ -23,7 +56,7 @@ function shortenKeys(row) {
   return o;
 }
 
-/* mapovanie na „pekné“ kľúče */
+/* normálizácia stĺpcov */
 function normalize(r) {
   return {
     id_objednavky:                   clean(r['OBJ.ID']),
@@ -52,7 +85,9 @@ function normalize(r) {
     dod_tel:                         clean(r['OBJ.Tel2']),
     dod_email:                       clean(r['OBJ.Email2']),
 
-    polozky:                         clean(r['Polozky objednavky']),
+    /* 🔹 položky rozparsované na pole objektov */
+    polozky:                         parseItems(clean(r['Polozky objednavky'])),
+
     forma_uhrady:                    clean(r['OBJ.RelForUh']),
     prepravca:                       clean(r['OBJ.RefDopravci']),
 
@@ -73,21 +108,20 @@ function normalize(r) {
   };
 }
 
-/* vždy načítaj čerstvé CSV – tolerantné nastavenie */
+/* vždy čerstvé CSV (tolerantné nastavenie) */
 async function loadCsv() {
   const url  = `${CSV_URL}${CSV_URL.includes('?') ? '&' : '?'}t=${Date.now()}`;
   const resp = await fetch(url, { headers: { 'Cache-Control': 'no-cache' }});
   if (!resp.ok) throw new Error(`CSV fetch failed: ${resp.status}`);
 
-  const text = await resp.text();
-  const raw  = parse(text, {
+  const raw = parse(await resp.text(), {
     delimiter: ';',
     columns: true,
     bom: true,
     skip_empty_lines: true,
     relax_column_count: true,
     relax_quotes: true,
-    skip_records_with_error: true       // ⬅ preskočí nevalidný riadok
+    skip_records_with_error: true
   });
 
   const rows = raw.map(r => normalize(shortenKeys(r)));
@@ -95,21 +129,20 @@ async function loadCsv() {
   return rows;
 }
 
-/* /orders  */
+/* --------- /orders ----------------------------------------- */
 app.get('/orders', async (req, res) => {
   const q = clean(req.query.query);
   if (!q) return res.status(400).json({ error: 'pridaj ?query=' });
 
   try {
     const data = await loadCsv();
-
     let result = data.filter(r => r.cislo_objednavky === q);
     if (!result.length) result = data.filter(r => r.cislo_faktury === q);
 
     if (!result.length) return res.status(404).json({ error: 'nič sme nenašli' });
     res.json(result);
-  } catch (err) {
-    console.error(err);
+  } catch (e) {
+    console.error(e);
     res.status(500).json({ error: 'CSV sa nepodarilo načítať' });
   }
 });
