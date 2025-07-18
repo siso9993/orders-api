@@ -4,9 +4,9 @@ import { pipeline } from 'stream';
 import { promisify } from 'util';
 
 
-const PORT      = process.env.PORT || 3000;
-const CSV_URL   = process.env.CSV_URL;          // nastavíš v Railway
-const CACHE_TTL = 30 * 1_000;                   // 30 s cache
+const PORT     = process.env.PORT || 3000;
+const CSV_URL  = process.env.CSV_URL;          // nastavíš v Railway
+const CACHE_TTL = 30 * 1000;                   // 30 s cache
 
 const pipe = promisify(pipeline);
 const app  = express();
@@ -14,24 +14,18 @@ const app  = express();
 let cache = [];
 let lastFetch = 0;
 
-/* --------- robustnejšie skrátenie hlavičky ------------------ */
+/* ---------- 1. NOVÉ – skráti hlavičky ------------------ */
 function shorten(row) {
   const o = {};
   for (const [k, v] of Object.entries(row)) {
-    // 1️⃣ ak je „-“, zober posledný úsek
-    let short = k.includes('-') ? k.split('-').pop() : k;
-
-    // 2️⃣ ak ešte stále nezačína na „OBJ.“, skús nájsť posledný „OBJ.…“
-    const m = short.match(/(OBJ\.[\w.]+)$/);
-    if (m) short = m[1];
-
-    o[short.replace(/^\uFEFF/, '').trim()] = v;
+    const short = k.split('-').pop().trim().replace(/^\uFEFF/, '');
+    o[short] = v;
   }
   return o;
 }
-/* ------------------------------------------------------------ */
+/* ------------------------------------------------------- */
 
-/* ----------- mapovanie na pekné kľúče ----------------------- */
+/* ---------- mapovanie na „pekné“ názvy ----------------- */
 function normalize(r) {
   return {
     id_objednavky:                   r['OBJ.ID'],
@@ -80,7 +74,7 @@ function normalize(r) {
     dovod_meskania:                  r['OBJ.VPrDovodMeskanTo'],
   };
 }
-/* ------------------------------------------------------------ */
+/* ------------------------------------------------------- */
 
 async function reload() {
   const res = await fetch(CSV_URL);
@@ -90,12 +84,14 @@ async function reload() {
   await pipe(
     res.body,
     csv({ separator: ';' })
+      /* ---------- 2. NOVÉ – vložené shorten() ---------- */
       .on('data', row => rows.push(normalize(shorten(row))))
+      /* ------------------------------------------------- */
   );
 
-  cache     = rows;
+  cache = rows;
   lastFetch = Date.now();
-  console.log(`CSV reloaded: ${rows.length} riadkov`);
+  console.log(CSV reloaded: ${rows.length} riadkov);
 }
 
 async function getData() {
@@ -108,13 +104,12 @@ app.get('/orders', async (req, res) => {
   if (!q) return res.status(400).json({ error: 'pridaj ?query=' });
 
   try {
-    const data   = await getData();
+    const data = await getData();
 
-    // 1️⃣ najprv presný match na číslo objednávky
+    /* ---------- 3. OPRAVA – fallback len keď je prázdne ------- */
     let result = data.filter(r => r.cislo_objednavky === q);
-
-    // 2️⃣ ak nič, skúsi číslo faktúry (OBJ.VPrCislofakturyt)
     if (!result.length) result = data.filter(r => r.cislo_faktury === q);
+    /* ---------------------------------------------------------- */
 
     if (!result.length) return res.status(404).json({ error: 'nič sme nenašli' });
     res.json(result);
@@ -124,4 +119,4 @@ app.get('/orders', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`API beží na porte ${PORT}`));
+app.listen(PORT, () => console.log(API beží na porte ${PORT}));
