@@ -2,25 +2,30 @@ import express from 'express';
 import csv from 'csv-parser';
 import { pipeline } from 'stream';
 import { promisify } from 'util';
-import { createReadStream } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import fetch from 'node-fetch';                // Railway na Node 18 → fetch takto
 
-const PORT      = process.env.PORT || 3000;
-/*  ak by si chcel súbor prehodiť inde / premennú z Railway,
-    nastav CSV_FILE, inak sa berie `api/pohoda_orders.csv` v repo  */
-const CSV_FILE  = process.env.CSV_FILE ||
-                  join(dirname(fileURLToPath(import.meta.url)), 'api', 'pohoda_orders.csv');
+const PORT     = process.env.PORT || 3000;
+const CSV_URL  = process.env.CSV_URL;          // nastavíš v Railway
+const CACHE_TTL = 30 * 1000;                   // 30 s cache
 
-const CACHE_TTL = 30 * 1000;            // 30 s
+const pipe = promisify(pipeline);
+const app  = express();
 
-const pipe  = promisify(pipeline);
-const app   = express();
-
-let cache     = [];
+let cache = [];
 let lastFetch = 0;
 
-// ------------------------- normalizácia stĺpcov ----------------------------
+/* ---------- 1. NOVÉ – skráti hlavičky ------------------ */
+function shorten(row) {
+  const o = {};
+  for (const [k, v] of Object.entries(row)) {
+    const short = k.split('-').pop().trim().replace(/^\uFEFF/, '');
+    o[short] = v;
+  }
+  return o;
+}
+/* ------------------------------------------------------- */
+
+/* ---------- mapovanie na „pekné“ názvy ----------------- */
 function normalize(r) {
   return {
     id_objednavky:                   r['OBJ.ID'],
@@ -69,26 +74,31 @@ function normalize(r) {
     dovod_meskania:                  r['OBJ.VPrDovodMeskanTo'],
   };
 }
-// ---------------------------------------------------------------------------
+/* ------------------------------------------------------- */
 
-async function reload () {
+async function reload() {
+  const res = await fetch(CSV_URL);
+  if (!res.ok) throw new Error('Fetch failed: ' + res.status);
+
   const rows = [];
   await pipe(
-    createReadStream(CSV_FILE),
-    csv({ separator: ';' }).on('data', row => rows.push(normalize(row)))
+    res.body,
+    csv({ separator: ';' })
+      /* ---------- 2. NOVÉ – vložené shorten() ---------- */
+      .on('data', row => rows.push(normalize(shorten(row))))
+      /* ------------------------------------------------- */
   );
 
-  cache     = rows;
+  cache = rows;
   lastFetch = Date.now();
   console.log(`CSV reloaded: ${rows.length} riadkov`);
 }
 
-async function getData () {
+async function getData() {
   if (Date.now() - lastFetch > CACHE_TTL) await reload();
   return cache;
 }
 
-// ------------------------------- API ---------------------------------------
 app.get('/orders', async (req, res) => {
   const q = (req.query.query || '').trim();
   if (!q) return res.status(400).json({ error: 'pridaj ?query=' });
@@ -96,9 +106,10 @@ app.get('/orders', async (req, res) => {
   try {
     const data = await getData();
 
-    const byOrder  = data.filter(r => r.cislo_objednavky === q);
-    const byInvoice= data.filter(r => r.cislo_faktury   === q);
-    const result   = byOrder.length ? byOrder : byInvoice;
+    /* ---------- 3. OPRAVA – fallback len keď je prázdne ------- */
+    let result = data.filter(r => r.cislo_objednavky === q);
+    if (!result.length) result = data.filter(r => r.cislo_faktury === q);
+    /* ---------------------------------------------------------- */
 
     if (!result.length) return res.status(404).json({ error: 'nič sme nenašli' });
     res.json(result);
@@ -107,8 +118,5 @@ app.get('/orders', async (req, res) => {
     res.status(500).json({ error: 'CSV sa nepodarilo načítať' });
   }
 });
-
-// jednoduchý health‑check
-app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
 app.listen(PORT, () => console.log(`API beží na porte ${PORT}`));
