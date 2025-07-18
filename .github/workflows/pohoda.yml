@@ -1,5 +1,8 @@
 name: Sync Pohoda CSV
 
+permissions:
+  contents: write        
+
 on:
   # každých 15 min
   schedule:
