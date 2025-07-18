@@ -2,103 +2,107 @@ import express from 'express';
 import csv from 'csv-parser';
 import { pipeline } from 'stream';
 import { promisify } from 'util';
-import { createReadStream } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
 
-const PORT      = process.env.PORT || 3000;
-/*  ak by si chcel súbor prehodiť inde / premennú z Railway,
-    nastav CSV_FILE, inak sa berie `api/pohoda_orders.csv` v repo  */
-const CSV_FILE  = process.env.CSV_FILE ||
-                  join(dirname(fileURLToPath(import.meta.url)), 'api', 'pohoda_orders.csv');
+const PORT    = process.env.PORT || 3000;
+const CSV_URL = process.env.CSV_URL;     // nastavíš v Railway
 
-const CACHE_TTL = 30 * 1000;            // 30 s
+const pipe = promisify(pipeline);
+const app  = express();
 
-const pipe  = promisify(pipeline);
-const app   = express();
+/* 🔹 pomocná funkcia – vždy string, bez medzier, CR, BOM … */
+const clean = v => (v ?? '').toString().replace(/^\uFEFF/, '').trim();
 
-let cache     = [];
-let lastFetch = 0;
+/* ---------- robustné skrátenie hlavičky ------------------ */
+function shorten(row) {
+  const o = {};
+  for (const [k, v] of Object.entries(row)) {
+    let short = k.includes('-') ? k.split('-').pop() : k;           // 1️⃣ po „-“
+    const m   = short.match(/(OBJ\.[\w.]+)$/);                     // 2️⃣ posledný OBJ.
+    if (m) short = m[1];
+    o[clean(short)] = v;
+  }
+  return o;
+}
+/* ---------------------------------------------------------- */
 
-// ------------------------- normalizácia stĺpcov ----------------------------
+/* ----------- mapovanie na pekné kľúče + clean() ----------- */
 function normalize(r) {
   return {
-    id_objednavky:                   r['OBJ.ID'],
-    cislo_objednavky:                r['OBJ.PDoklad'],
-    datum_objednavky:                r['OBJ.Datum'],
-    zdroj_objednavky:                r['OBJ.SText'],
+    id_objednavky:                   clean(r['OBJ.ID']),
+    cislo_objednavky:                clean(r['OBJ.PDoklad']),
+    datum_objednavky:                clean(r['OBJ.Datum']),
+    zdroj_objednavky:                clean(r['OBJ.SText']),
 
-    nazov_firmy:                     r['OBJ.Firma'],
-    ico:                             r['OBJ.ICO'],
-    dic:                             r['OBJ.DIC'],
-    icdph:                           r['OBJ.ICDPH'],
+    nazov_firmy:                     clean(r['OBJ.Firma']),
+    ico:                             clean(r['OBJ.ICO']),
+    dic:                             clean(r['OBJ.DIC']),
+    icdph:                           clean(r['OBJ.ICDPH']),
 
-    meno:                            r['OBJ.Jmeno'],
-    ulica:                           r['OBJ.Ulica'],
-    psc:                             r['OBJ.PSC'],
-    obec:                            r['OBJ.Obec'],
-    tel:                             r['OBJ.Tel'],
-    email:                           r['OBJ.Email'],
+    meno:                            clean(r['OBJ.Jmeno']),
+    ulica:                           clean(r['OBJ.Ulica']),
+    psc:                             clean(r['OBJ.PSC']),
+    obec:                            clean(r['OBJ.Obec']),
+    tel:                             clean(r['OBJ.Tel']),
+    email:                           clean(r['OBJ.Email']),
 
-    dod_firma:                       r['OBJ.Firma2'],
-    dod_meno:                        r['OBJ.Jmeno2'],
-    dod_ulica:                       r['OBJ.Ulice2'],
-    dod_psc:                         r['OBJ.PSC2'],
-    dod_obec:                        r['OBJ.Obec2'],
-    dod_krajina:                     r['OBJ.RefZeme2'],
-    dod_tel:                         r['OBJ.Tel2'],
-    dod_email:                       r['OBJ.Email2'],
+    dod_firma:                       clean(r['OBJ.Firma2']),
+    dod_meno:                        clean(r['OBJ.Jmeno2']),
+    dod_ulica:                       clean(r['OBJ.Ulice2']),
+    dod_psc:                         clean(r['OBJ.PSC2']),
+    dod_obec:                        clean(r['OBJ.Obec2']),
+    dod_krajina:                     clean(r['OBJ.RefZeme2']),
+    dod_tel:                         clean(r['OBJ.Tel2']),
+    dod_email:                       clean(r['OBJ.Email2']),
 
-    polozky:                         r['Polozky objednavky'],
-    forma_uhrady:                    r['OBJ.RelForUh'],
-    prepravca:                       r['OBJ.RefDopravci'],
+    polozky:                         clean(r['Polozky objednavky']),
+    forma_uhrady:                    clean(r['OBJ.RelForUh']),
+    prepravca:                       clean(r['OBJ.RefDopravci']),
 
-    mena_cudzia:                     r['OBJ.RefCM'],
-    suma_cudzia:                     r['OBJ.CmCelkem'],
-    suma_eur:                        r['OBJ.KcCelkem'],
+    mena_cudzia:                     clean(r['OBJ.RefCM']),
+    suma_cudzia:                     clean(r['OBJ.CmCelkem']),
+    suma_eur:                        clean(r['OBJ.KcCelkem']),
 
-    stav:                            r['OBJ.Labels'],
-    datum_storna:                    r['OBJ.DatStorn'],
-    vyfakturovana:                   r['OBJ.Vyrizeno'],
+    stav:                            clean(r['OBJ.Labels']),
+    datum_storna:                    clean(r['OBJ.DatStorn']),
+    vyfakturovana:                   clean(r['OBJ.Vyrizeno']),
 
-    poznamka:                        r['OBJ.Pozn'],
-    dovod_storna:                    r['OBJ.RefVPrDovodstorn'],
-    cislo_faktury:                   r['OBJ.VPrCislofakturyt'],
-    objednane_u_dodavatela:          r['OBJ.VPrObjednaneUdod'],
-    planovane_naskladnenie:          r['OBJ.VPrDatDodKuNam'],
-    dovod_meskania:                  r['OBJ.VPrDovodMeskanTo'],
+    poznamka:                        clean(r['OBJ.Pozn']),
+    dovod_storna:                    clean(r['OBJ.RefVPrDovodstorn']),
+    cislo_faktury:                   clean(r['OBJ.VPrCislofakturyt']),
+    objednane_u_dodavatela:          clean(r['OBJ.VPrObjednaneUdod']),
+    planovane_naskladnenie:          clean(r['OBJ.VPrDatDodKuNam']),
+    dovod_meskania:                  clean(r['OBJ.VPrDovodMeskanTo']),
   };
 }
-// ---------------------------------------------------------------------------
+/* ---------------------------------------------------------- */
 
-async function reload () {
+/* ------------ vždy stiahne ČERSTVÉ CSV -------------------- */
+async function fetchCsv() {
+  const url = `${CSV_URL}${CSV_URL.includes('?') ? '&' : '?'}t=${Date.now()}`; // cache‑buster
+  const res = await fetch(url, { headers: { 'Cache-Control': 'no-cache' } });
+  if (!res.ok) throw new Error('Fetch failed: ' + res.status);
+
   const rows = [];
   await pipe(
-    createReadStream(CSV_FILE),
-    csv({ separator: ';' }).on('data', row => rows.push(normalize(row)))
+    res.body,
+    csv({ separator: ';' })
+      .on('data', row => rows.push(normalize(shorten(row))))
   );
 
-  cache     = rows;
-  lastFetch = Date.now();
-  console.log(`CSV reloaded: ${rows.length} riadkov`);
+  console.log(`CSV načítané: ${rows.length} riadkov`);
+  return rows;
 }
+/* ---------------------------------------------------------- */
 
-async function getData () {
-  if (Date.now() - lastFetch > CACHE_TTL) await reload();
-  return cache;
-}
-
-// ------------------------------- API ---------------------------------------
 app.get('/orders', async (req, res) => {
-  const q = (req.query.query || '').trim();
+  const q = clean(req.query.query);
   if (!q) return res.status(400).json({ error: 'pridaj ?query=' });
 
   try {
-    const data = await getData();
+    const data = await fetchCsv();          // ⬅ žiadna cache, vždy nové dáta
 
-    const byOrder  = data.filter(r => r.cislo_objednavky === q);
-    const byInvoice= data.filter(r => r.cislo_faktury   === q);
-    const result   = byOrder.length ? byOrder : byInvoice;
+    let result = data.filter(r => r.cislo_objednavky === q);
+    if (!result.length) result = data.filter(r => r.cislo_faktury === q);
 
     if (!result.length) return res.status(404).json({ error: 'nič sme nenašli' });
     res.json(result);
@@ -107,8 +111,5 @@ app.get('/orders', async (req, res) => {
     res.status(500).json({ error: 'CSV sa nepodarilo načítať' });
   }
 });
-
-// jednoduchý health‑check
-app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
 app.listen(PORT, () => console.log(`API beží na porte ${PORT}`));
