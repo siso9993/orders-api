@@ -1,0 +1,33 @@
+name: Sync Pohoda CSV
+
+on:
+  # každých 15 min
+  schedule:
+    - cron: "*/15 * * * *"
+  # aj pri každom push‑i (aby sa spustilo hneď po pridaní workflowu)
+  push:
+    branches: [ main ]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Download CSV
+        run: |
+          curl -L --fail -o api/pohoda_orders.csv \
+            "https://vem-scooter.cz/wp-content/uploads/pohoda-export/vsetky_pohoda_objednavky.csv"
+
+      - name: Commit if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git add api/pohoda_orders.csv
+            git commit -m "chore: auto‑sync CSV ($(date -u +'%F %T'))"
+            git push
+          else
+            echo "No changes – skip commit"
+          fi
