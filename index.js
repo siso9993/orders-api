@@ -3,6 +3,7 @@ import csv from 'csv-parser';
 import { pipeline } from 'stream';
 import { promisify } from 'util';
 
+
 const PORT      = process.env.PORT || 3000;
 const CSV_URL   = process.env.CSV_URL;          // nastavíš v Railway
 const CACHE_TTL = 30 * 1_000;                   // 30 s cache
