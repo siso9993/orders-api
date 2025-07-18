@@ -1,29 +1,29 @@
 import express from 'express';
-import fetch from 'node-fetch';           // Node < 18 pridaj do dependencies
+import fetch from 'node-fetch';            // potreba pri Node < 18
 import { parse } from 'csv-parse/sync';
 
 const PORT    = process.env.PORT || 3000;
-const CSV_URL = process.env.CSV_URL;      // nastavíš v Railway
+const CSV_URL = process.env.CSV_URL;       // nastavíš v Railway
 
 const app = express();
 
-/* 🔹 common helper */
+/* helper – string + trim + odrezanie BOM */
 const clean = v => (v ?? '').toString().replace(/^\uFEFF/, '').trim();
 
-/* 🔹 skrátenie hlavičky na OBJ.* */
+/* skracovanie hlavičiek na posledný „OBJ.…“ */
 function shortenKeys(row) {
   const o = {};
   for (const [k, v] of Object.entries(row)) {
     if (!k) continue;
     let key = k.includes('-') ? k.split('-').pop() : k;
-    const m  = key.match(/(OBJ\.[\w.]+)$/);
+    const m = key.match(/(OBJ\.[\w.]+)$/);
     if (m) key = m[1];
     o[clean(key)] = v;
   }
   return o;
 }
 
-/* 🔹 mapujeme na pekné názvy */
+/* mapovanie na „pekné“ kľúče */
 function normalize(r) {
   return {
     id_objednavky:                   clean(r['OBJ.ID']),
@@ -73,7 +73,7 @@ function normalize(r) {
   };
 }
 
-/* 🔹 vždy čerstvé CSV (cache‑buster) */
+/* vždy načítaj čerstvé CSV – tolerantné nastavenie */
 async function loadCsv() {
   const url  = `${CSV_URL}${CSV_URL.includes('?') ? '&' : '?'}t=${Date.now()}`;
   const resp = await fetch(url, { headers: { 'Cache-Control': 'no-cache' }});
@@ -83,9 +83,11 @@ async function loadCsv() {
   const raw  = parse(text, {
     delimiter: ';',
     columns: true,
+    bom: true,
     skip_empty_lines: true,
     relax_column_count: true,
-    bom: true
+    relax_quotes: true,
+    skip_records_with_error: true       // ⬅ preskočí nevalidný riadok
   });
 
   const rows = raw.map(r => normalize(shortenKeys(r)));
@@ -93,7 +95,7 @@ async function loadCsv() {
   return rows;
 }
 
-/* 🔹 /orders endpoint */
+/* /orders  */
 app.get('/orders', async (req, res) => {
   const q = clean(req.query.query);
   if (!q) return res.status(400).json({ error: 'pridaj ?query=' });
@@ -113,4 +115,3 @@ app.get('/orders', async (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`API beží na porte ${PORT}`));
-
