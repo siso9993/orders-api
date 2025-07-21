@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';               // 🔹 pridané
 import fetch from 'node-fetch';
 import { parse } from 'csv-parse/sync';
 
@@ -7,10 +8,22 @@ const CSV_URL = process.env.CSV_URL;
 
 const app = express();
 
+/* 1) CORS – musí byť pred všetkými routami ------------------- */
+app.use(
+  cors({
+    origin: [
+      'https://dashboard.vapi.ai',     // tester v dashboarde
+      'https://app.vapi.ai'            // produkčné hovory
+    ],
+    methods: ['GET', 'OPTIONS']
+  })
+);
+/* ------------------------------------------------------------ */
+
 /* util – always string, trim, bez BOM */
 const clean = v => (v ?? '').toString().replace(/^\uFEFF/, '').trim();
 
-/* ---- parseItems ------------------------------------------------ */
+/* ---- parseItems ------------------------------------------- */
 function parseItems(str = '') {
   return str
     .split('|')
@@ -38,7 +51,7 @@ function parseItems(str = '') {
       /* cena + mena (EUR, CZK …) */
       const mPrice = meta.match(/Suma položky\s*:\s*([\d.,]+)\s*([A-Z]{3})?/i);
       const cena   = mPrice ? parseFloat(mPrice[1].replace(',', '.')) : null;
-      const mena   = mPrice && mPrice[2] ? mPrice[2] : null;   // ak neudá, zostane null
+      const mena   = mPrice && mPrice[2] ? mPrice[2] : null;
 
       return {
         kod_polozky:      kod,
@@ -50,9 +63,7 @@ function parseItems(str = '') {
     });
 }
 
-/* ----------------------------------------------------------- */
-
-/* skracovanie hlavičky na posledný „OBJ.…“ */
+/* skracovanie hlavičky na posledný „OBJ.…“ ------------------- */
 function shortenKeys(r) {
   const o = {};
   for (const [k, v] of Object.entries(r)) {
@@ -64,7 +75,7 @@ function shortenKeys(r) {
   return o;
 }
 
-/* normálizácia stĺpcov */
+/* normálizácia stĺpcov --------------------------------------- */
 function normalize(r) {
   return {
     id_objednavky:                   clean(r['OBJ.ID']),
@@ -116,7 +127,7 @@ function normalize(r) {
   };
 }
 
-/* vždy čerstvé CSV (tolerantné nastavenie) */
+/* vždy čerstvé CSV ------------------------------------------- */
 async function loadCsv() {
   const url  = `${CSV_URL}${CSV_URL.includes('?') ? '&' : '?'}t=${Date.now()}`;
   const resp = await fetch(url, { headers: { 'Cache-Control': 'no-cache' }});
