@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';               // 🔹 pridané
 import fetch from 'node-fetch';
 import { parse } from 'csv-parse/sync';
+import { datumOrRangeByCountry } from './dateWordsMulti.js';
 
 const PORT    = process.env.PORT || 3000;
 const CSV_URL = process.env.CSV_URL;
@@ -77,57 +78,74 @@ function shortenKeys(r) {
 
 /* normálizácia stĺpcov --------------------------------------- */
 function normalize(r) {
+  /* 👉 dôležité: získame krajinu hneď na začiatku,
+     aby sme ju mohli poslať helperu pri každom dátume */
+  const dod_krajina = clean(r['OBJ.RefZeme2']);
+
   return {
-    id_objednavky:                   clean(r['OBJ.ID']),
-    cislo_objednavky:                clean(r['OBJ.PDoklad']),
-    datum_objednavky:                clean(r['OBJ.Datum']),
-    zdroj_objednavky:                clean(r['OBJ.SText']),
+    id_objednavky:            clean(r['OBJ.ID']),
+    cislo_objednavky:         clean(r['OBJ.PDoklad']),
 
-    nazov_firmy:                     clean(r['OBJ.Firma']),
-    ico:                             clean(r['OBJ.ICO']),
-    dic:                             clean(r['OBJ.DIC']),
-    icdph:                           clean(r['OBJ.ICDPH']),
+    /* ⏰ číselný alebo rozsahový dátum → slovom */
+    datum_objednavky:
+      datumOrRangeByCountry(clean(r['OBJ.Datum']), dod_krajina),
 
-    meno:                            clean(r['OBJ.Jmeno']),
-    ulica:                           clean(r['OBJ.Ulica']),
-    psc:                             clean(r['OBJ.PSC']),
-    obec:                            clean(r['OBJ.Obec']),
-    tel:                             clean(r['OBJ.Tel']),
-    email:                           clean(r['OBJ.Email']),
+    zdroj_objednavky:         clean(r['OBJ.SText']),
 
-    dod_firma:                       clean(r['OBJ.Firma2']),
-    dod_meno:                        clean(r['OBJ.Jmeno2']),
-    dod_ulica:                       clean(r['OBJ.Ulice2']),
-    dod_psc:                         clean(r['OBJ.PSC2']),
-    dod_obec:                        clean(r['OBJ.Obec2']),
-    dod_krajina:                     clean(r['OBJ.RefZeme2']),
-    dod_tel:                         clean(r['OBJ.Tel2']),
-    dod_email:                       clean(r['OBJ.Email2']),
+    /* … ostatné ne‑dátumové polia … */
+    nazov_firmy:              clean(r['OBJ.Firma']),
+    ico:                      clean(r['OBJ.ICO']),
+    dic:                      clean(r['OBJ.DIC']),
+    icdph:                    clean(r['OBJ.ICDPH']),
+
+    meno:                     clean(r['OBJ.Jmeno']),
+    ulica:                    clean(r['OBJ.Ulica']),
+    psc:                      clean(r['OBJ.PSC']),
+    obec:                     clean(r['OBJ.Obec']),
+    tel:                      clean(r['OBJ.Tel']),
+    email:                    clean(r['OBJ.Email']),
+
+    dod_firma:                clean(r['OBJ.Firma2']),
+    dod_meno:                 clean(r['OBJ.Jmeno2']),
+    dod_ulica:                clean(r['OBJ.Ulice2']),
+    dod_psc:                  clean(r['OBJ.PSC2']),
+    dod_obec:                 clean(r['OBJ.Obec2']),
+    dod_krajina,                              // už máme vyčistené
+    dod_tel:                  clean(r['OBJ.Tel2']),
+    dod_email:                clean(r['OBJ.Email2']),
 
     /* 🔹 položky rozparsované na pole objektov */
-    polozky:                         parseItems(clean(r['Polozky objednavky'])),
+    polozky:                  parseItems(clean(r['Polozky objednavky'])),
 
-    forma_uhrady:                    clean(r['OBJ.RelForUh']),
-    prepravca:                       clean(r['OBJ.RefDopravci']),
+    forma_uhrady:             clean(r['OBJ.RelForUh']),
+    prepravca:                clean(r['OBJ.RefDopravci']),
 
-    mena_cudzia:                     clean(r['OBJ.RefCM']),
-    suma_cudzia:                     clean(r['OBJ.CmCelkem']),
-    suma_eur:                        clean(r['OBJ.KcCelkem']),
+    mena_cudzia:              clean(r['OBJ.RefCM']),
+    suma_cudzia:              clean(r['OBJ.CmCelkem']),
+    suma_eur:                 clean(r['OBJ.KcCelkem']),
 
-    stav:                            clean(r['OBJ.Labels']),
-    datum_storna:                    clean(r['OBJ.DatStorn']),
-    vyfakturovana:                   clean(r['OBJ.Vyrizeno']),
+    stav:                     clean(r['OBJ.Labels']),
 
-    poznamka:                        clean(r['OBJ.Pozn']),
-    dovod_storna:                    clean(r['OBJ.RefVPrDovodstorn']),
-    cislo_faktury:                   clean(r['OBJ.VPrCislofakturyt']),
-    objednane_u_dodavatela:          clean(r['OBJ.VPrObjednaneUdod']),
-    planovane_odhadovane_naskladnenie_na_nas_sklad:          clean(r['OBJ.VPrDatDodKuNam']),
-    predpokladany_datum_dodania_zakaznikovi:     clean(r['OBJ.VPrDatumDodPom']),
-    dovod_meskania:                  clean(r['OBJ.VPrDovodMeskanTo'])
+    /* ⏰ ďalšie dátumy → slovom (môžu byť prázdne/NULL) */
+    datum_storna:
+      datumOrRangeByCountry(clean(r['OBJ.DatStorn']), dod_krajina),
+
+    vyfakturovana:            clean(r['OBJ.Vyrizeno']),
+
+    poznamka:                 clean(r['OBJ.Pozn']),
+    dovod_storna:             clean(r['OBJ.RefVPrDovodstorn']),
+    cislo_faktury:            clean(r['OBJ.VPrCislofakturyt']),
+    objednane_u_dodavatela:   clean(r['OBJ.VPrObjednaneUdod']),
+
+    planovane_odhadovane_naskladnenie_na_nas_sklad:
+      datumOrRangeByCountry(clean(r['OBJ.VPrDatDodKuNam']), dod_krajina),
+
+    predpokladany_datum_dodania_zakaznikovi:
+      datumOrRangeByCountry(clean(r['OBJ.VPrDatumDodPom']), dod_krajina),
+
+    dovod_meskania:           clean(r['OBJ.VPrDovodMeskanTo'])
   };
 }
-
 /* vždy čerstvé CSV ------------------------------------------- */
 async function loadCsv() {
   const url  = `${CSV_URL}${CSV_URL.includes('?') ? '&' : '?'}t=${Date.now()}`;
