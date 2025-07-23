@@ -6,7 +6,7 @@ permissions:
 on:
   # každých 15 min
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: '4,19,34,49 * * * *'
   # aj pri každom push‑i (aby sa spustilo hneď po pridaní workflowu)
   push:
     branches: [ main ]
