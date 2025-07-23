@@ -122,7 +122,7 @@ function normalize(r) {
     dovod_storna:                    clean(r['OBJ.RefVPrDovodstorn']),
     cislo_faktury:                   clean(r['OBJ.VPrCislofakturyt']),
     objednane_u_dodavatela:          clean(r['OBJ.VPrObjednaneUdod']),
-    planovane_naskladnenie_na_nas_sklad:          clean(r['OBJ.VPrDatDodKuNam']),
+    planovane_odhadovane_naskladnenie_na_nas_sklad:          clean(r['OBJ.VPrDatDodKuNam']),
     predpokladany_datum_dodania_zakaznikovi:     clean(r['OBJ.VPrDatumDodPom']),
     dovod_meskania:                  clean(r['OBJ.VPrDovodMeskanTo'])
   };
