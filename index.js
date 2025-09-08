@@ -178,7 +178,12 @@ app.get('/orders', async (req, res) => {
     if (!result.length) result = data.filter(r => r.cislo_faktury === q);
 
     if (!result.length) return res.status(404).json({ error: 'nič sme nenašli' });
-    res.json(result);
+
+    // ✅ vráť jeden objekt (bez [ ])
+    res.json(result[0]);
+
+    // (voliteľne) ak chceš vedieť, či bolo viac zásahov:
+    // if (result.length > 1) res.set('X-Matches', String(result.length));
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'CSV sa nepodarilo načítať' });
