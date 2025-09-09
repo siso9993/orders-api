@@ -167,6 +167,35 @@ async function loadCsv() {
   return rows;
 }
 
+
+// helper – spoločné hľadanie podľa query (objednávka / faktúra)
+async function findOrdersByQuery(q) {
+  const data = await loadCsv();
+  let result = data.filter(r => r.cislo_objednavky === q);
+  if (!result.length) result = data.filter(r => r.cislo_faktury === q);
+  return result;
+}
+
+/* --------- /orders1 -> vracia objekt {} -------------------- */
+app.get('/orders1', async (req, res) => {
+  const q = clean(req.query.query);
+  if (!q) return res.status(400).json({ error: 'pridaj ?query=' });
+
+  try {
+    const result = await findOrdersByQuery(q);
+    if (!result.length) return res.status(404).json({ error: 'nič sme nenašli' });
+
+    // voliteľne info o počte zhôd
+    res.set('X-Matches', String(result.length));
+
+    // ✅ vráť prvý objekt (bez hranatých zátvoriek)
+    res.json(result[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'CSV sa nepodarilo načítať' });
+  }
+});
+
 /* --------- /orders ----------------------------------------- */
 app.get('/orders', async (req, res) => {
   const q = clean(req.query.query);
