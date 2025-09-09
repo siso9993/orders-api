@@ -179,8 +179,8 @@ app.get('/orders', async (req, res) => {
 
     if (!result.length) return res.status(404).json({ error: 'nič sme nenašli' });
 
-    // ✅ vráť jeden objekt (bez [ ])
-    res.json(result[0]);
+    // ✅ vráť jeden objekt 
+    res.json(result);
 
     // (voliteľne) ak chceš vedieť, či bolo viac zásahov:
     // if (result.length > 1) res.set('X-Matches', String(result.length));
